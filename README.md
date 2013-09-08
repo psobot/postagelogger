@@ -2,6 +2,7 @@ postagelogger
 =============
 
 by Peter Sobot, September 7, 2013. Licensed under MIT.
+
 Python logging handler that sends emails via [PostageApp](http://postageapp.com/).
 
 ##Usage
