@@ -10,10 +10,10 @@ import threading
 class PostageAppHandler(logging.Handler):
     """
     A handler class which sends an email via PostageApp for each logging event.
-    If batch_timeout is specified, log messages will be batched together and
+    If timeout is specified, log messages will be batched together and
     sent every $n$ seconds in one email.
     """
-    def __init__(self, api_key, fromaddr, recipients, batch_timeout=None):
+    def __init__(self, api_key, fromaddr, recipients, timeout=None):
         """
         Initialize the handler.
 
@@ -30,7 +30,7 @@ class PostageAppHandler(logging.Handler):
 
         self.records = []
 
-        self.delay = batch_timeout
+        self.delay = timeout if timeout is None else float(timeout)
         if self.delay is not None:
             self.exit = False
             self.finished = False
