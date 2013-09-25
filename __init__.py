@@ -8,6 +8,8 @@ import threading
 
 
 class PostageAppHandler(logging.Handler):
+    threads = {}
+
     """
     A handler class which sends an email via PostageApp for each logging event.
     If timeout is specified, log messages will be batched together and
@@ -26,7 +28,7 @@ class PostageAppHandler(logging.Handler):
         self.fromaddr = fromaddr
         if isinstance(recipients, basestring):
             recipients = [recipients]
-        self.recipients = recipients
+        self.recipients = frozenset(recipients)
 
         self.records = []
 
@@ -34,11 +36,32 @@ class PostageAppHandler(logging.Handler):
         if self.delay is not None:
             self.exit = False
             self.finished = False
-            atexit.register(self.stop)
 
-            self.thread = threading.Thread(target=self.run)
-            self.thread.setDaemon(True)
-            self.thread.start()
+            if not self.__threadkey() in self.threads:
+                atexit.register(self.stop)
+                thread = threading.Thread(target=self.run)
+                thread.setDaemon(True)
+                thread.start()
+                thread.records = []
+                self.threads[self.__threadkey()] = thread
+
+    def __threadkey(self):
+        return (self.api_key, self.fromaddr, self.recipients, self.delay)
+
+    def __thread(self):
+        return self.threads.get(self.__threadkey(), None)
+
+    def addRecord(self, record):
+        (self.__thread() or self).records.append(
+            (self.getSubject(record), self.format(record),
+             record.levelname, record)
+        )
+
+    def getRecords(self):
+        return (self.__thread() or self).records
+
+    def clearRecords(self):
+        (self.__thread() or self).records = []
 
     def getSubject(self, record):
         """
@@ -55,9 +78,7 @@ class PostageAppHandler(logging.Handler):
 
         Format the record and send it to the specified addressees.
         """
-        self.records.append(
-            (self.getSubject(record), self.format(record), record.levelname)
-        )
+        self.addRecord(record)
         if self.delay is None:
             self.send()
 
@@ -71,13 +92,14 @@ class PostageAppHandler(logging.Handler):
             self.finish()
 
     def send(self):
-        if not self.records:
+        records = self.getRecords()
+        if not records:
             return
 
         obj = {
             'api_key': self.api_key,
             'arguments': {
-                'recipients': self.recipients,
+                'recipients': list(self.recipients),
                 'headers': {
                     'from': self.fromaddr,
                 },
@@ -86,30 +108,31 @@ class PostageAppHandler(logging.Handler):
             }
         }
 
-        if len(self.records) == 1:
-            record = self.records.pop()
+        if len(records) == 1:
+            record = records.pop()
             (obj['arguments']['headers']['subject'],
-             obj['arguments']['content']['text/plain'], _) = record
+             obj['arguments']['content']['text/plain'], _, _) = record
         else:
-            if len(set([x[2] for x in self.records])) == 1:
+            if len(set([x[2] for x in records])) == 1:
                 obj['arguments']['headers']['subject'] = (
                     "%d %s events on %s" % (
-                        len(self.records),
-                        self.records[0][2],
+                        len(records),
+                        records[0][2],
                         socket.gethostname(),
                     )
                     )
             else:
                 obj['arguments']['headers']['subject'] = "%d events on %s" % (
-                    len(self.records),
+                    len(records),
                     socket.gethostname(),
                 )
             obj['arguments']['content']['text/plain'] = (
                 ("\n" + ('-' * 80) + "\n").join(
-                    [x[1] for x in self.records]
+                    [x[1] for x in records]
                 )
             )
-            self.records = []
+            records = []
+            self.clearRecords()
 
         try:
             req = urllib2.Request(
@@ -129,7 +152,8 @@ class PostageAppHandler(logging.Handler):
         except (KeyboardInterrupt, SystemExit):
             raise
         except:
-            self.handleError(record)
+            for record in records:
+                self.handleError(record[-1])
 
     def stop(self):
         self.exit = True
