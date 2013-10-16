@@ -15,7 +15,8 @@ class PostageAppHandler(logging.Handler):
     If timeout is specified, log messages will be batched together and
     sent every $n$ seconds in one email.
     """
-    def __init__(self, api_key, fromaddr, recipients, timeout=None):
+    def __init__(self, api_key, fromaddr, recipients,
+                 timeout=None, critical_immediate=False):
         """
         Initialize the handler.
 
@@ -36,6 +37,7 @@ class PostageAppHandler(logging.Handler):
         if self.delay is not None:
             self.exit = False
             self.finished = False
+            self.critical_immediate = critical_immediate
 
             if not self.__threadkey() in self.threads:
                 atexit.register(self.stop)
@@ -79,7 +81,9 @@ class PostageAppHandler(logging.Handler):
         Format the record and send it to the specified addressees.
         """
         self.addRecord(record)
-        if self.delay is None:
+        if (self.delay is None
+                or (self.critical_immediate
+                    and record.levelno >= logging.CRITICAL)):
             self.send()
 
     def run(self):
